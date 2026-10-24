@@ -6,6 +6,10 @@ New features
 - add padding routines for the E3SM cubed sphere grid. See `earth2grid.cubedsphere.e3sm`.
 - healpix: add `earth2grid.healpix.get_ring_info`
 
+Bug fixes
+- healpix: `ang2pix` returned a pixel up to a face width away for points on a base-face edge, e.g. the
+  meridians 0, 90, 180 and 270 north of 41.8°N and the north pole (#48)
+
 ## 2025.11.1
 
 New features:

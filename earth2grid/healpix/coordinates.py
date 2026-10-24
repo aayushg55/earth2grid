@@ -166,23 +166,35 @@ def global_to_face(xs: torch.Tensor, ys: torch.Tensor) -> tuple[torch.Tensor, to
     x = (xs + ys + 1.0) / 2.0
     y = (ys - xs - 1.0) / 2.0
 
+    # block (x_block, y_block) holds x_block <= x < x_block + 1 and y_block <= -y < y_block + 1,
+    # so an integer y is on the top edge of its block: fraction 1, not 0
     x_block = x.floor().int()
-    # faces are ordered N to S
     y_block = (-y).floor().int()
+    # a fraction of 1 is the far edge of the face
+    below_one = 1 - torch.finfo(x.dtype).eps / 2
+    x_frac = (x % 1.0).clamp(max=below_one)
+    y_frac = torch.where(y == y.floor(), below_one, (y % 1.0).clamp(max=below_one))
 
-    # Clamp y_block to valid range [0, 4] to avoid negative face indices
-    # This handles edge cases where y is very close to 0
-    y_block = torch.clamp(y_block, 0, 4)
-    x_block = torch.clamp(x_block, 0, 4)
+    # Exact points satisfy |x_block - y_block| <= 1. Rounding moves each block index by at most one, so
+    # |d| = 2 means the index of the coordinate nearest its block edge rounded: move that one back.
+    # |d| = 3 needs x and -y both near integers, which in the polar caps is only the pole: move both.
+    d = x_block - y_block
+    north = d >= 2
+    south = d <= -2
+    both = d.abs() == 3
+    move_x = (torch.where(north, x_frac <= y_frac, x_frac >= y_frac) & (north | south)) | both
+    move_y = ((north | south) & ~move_x) | both
+    x_block = x_block - (north & move_x).int() + (south & move_x).int()
+    y_block = y_block + (north & move_y).int() - (south & move_y).int()
+    edge = torch.where(north, x_frac.new_tensor(below_one), x_frac.new_tensor(0.0))
+    x_frac = torch.where(move_x, edge, x_frac)
+    y_frac = torch.where(move_y, edge, y_frac)
 
-    # north
-    face = torch.where(x_block > y_block, y_block, 0)
-    # equator
+    # blocks repeat with period (4, 4); faces are ordered N to S
+    face = torch.where(x_block > y_block, y_block % 4, 0)
     face = torch.where(x_block == y_block, x_block % 4 + 4, face)
-    # south
     face = torch.where(x_block < y_block, x_block % 4 + 8, face)
-
-    return x % 1.0, y % 1.0, face
+    return x_frac, y_frac, face
 
 
 def face_to_global(x: torch.Tensor, y: torch.Tensor, face: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:

@@ -451,9 +451,63 @@ def test_latlon_regression(regtest):
         np.savetxt(regtest, ll, fmt="%.3f", delimiter="\t")
 
 
-@pytest.mark.parametrize("level,lat,lon", [(14, -157.3648, -19.881105), (7, 70.0, 0.0)])
-def test_hpx14_regression(level, lat, lon):
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize(
+    "level,lon,lat,expected",
+    [
+        # expected: the NEST pixel containing (lon, lat), from the HEALPix reference implementation
+        (14, -157.3648, -19.881105, 2885669425),
+        (7, 0.0, 70.0, 15083),  # issue #48
+        (6, 180.0, -60.533298, 43050),
+        (6, 90.0, 43.502998, 6830),
+        (6, 0.0, 43.18000030517578, 2731),
+        (6, 171.55361938476562, 32.78818893432617, 28591),
+        (6, 340.848388671875, 22.51582908630371, 20154),
+        (6, 30.0, 90.0, 4095),
+    ],
+)
+def test_ang2pix_regression(level, lon, lat, expected, dtype):
     grid = healpix.Grid(level, pixel_order=healpix.PixelOrder.NEST)
-    # also fails grid=H.Grid(14)
-    pix = grid.ang2pix(torch.tensor([lon]).float(), torch.tensor([lat]).float())
-    assert torch.all(pix >= 0)
+    pix = grid.ang2pix(torch.tensor([lon], dtype=dtype), torch.tensor([lat], dtype=dtype))
+    assert pix.item() == expected
+
+
+def _face_edge_points(dtype):
+    """Points on the edges of the 12 base faces and on the meridians 0, 90, 180 and 270."""
+    t = torch.linspace(0, 1, 401, dtype=torch.float64)
+    x, y, f = [], [], []
+    for face in range(12):
+        for ex, ey in ((t, 0 * t), (t, 0 * t + 1), (0 * t, t), (0 * t + 1, t)):
+            x.append(ex)
+            y.append(ey)
+            f.append(torch.full_like(ex, face, dtype=torch.int64))
+    lon, lat = healpix.global_to_angular(*healpix.face_to_global(torch.cat(x), torch.cat(y), torch.cat(f)))
+    mlon, mlat = torch.meshgrid(
+        torch.tensor([0.0, 90.0, 180.0, 270.0], dtype=torch.float64),
+        torch.linspace(-90, 90, 3601, dtype=torch.float64),
+        indexing="ij",
+    )
+    lon, lat = torch.cat([lon, mlon.flatten()]), torch.cat([lat, mlat.flatten()])
+    finite = lon.isfinite() & lat.isfinite()
+    return lon[finite].to(dtype), lat[finite].to(dtype)
+
+
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.float64])
+@pytest.mark.parametrize("level", [1, 2, 6, 10, 12])
+def test_ang2pix_face_edges_within_one_pixel(level, dtype, device):
+    if device == "cuda" and torch.cuda.device_count() == 0:
+        pytest.skip("no cuda devices available")
+    grid = healpix.Grid(level, pixel_order=healpix.PixelOrder.NEST)
+    lon, lat = _face_edge_points(dtype)
+    pix = grid.ang2pix(lon.to(device), lat.to(device)).cpu()
+    clon, clat = grid.pix2ang(pix)
+
+    def unit(lon, lat):
+        lon, lat = torch.deg2rad(lon.double()), torch.deg2rad(lat.double())
+        return torch.stack([lat.cos() * lon.cos(), lat.cos() * lon.sin(), lat.sin()], -1)
+
+    distance = torch.arccos((unit(lon, lat) * unit(clon, clat)).sum(-1).clamp(-1, 1))
+    pixel_width = math.sqrt(4 * math.pi / grid.shape[-1])
+    # every point of a HEALPix pixel lies within about one pixel width of its centre
+    assert (distance / pixel_width).max() < 1.1
