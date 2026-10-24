@@ -318,7 +318,12 @@ class Grid(base.Grid):
             raise ValueError(self.pixel_order)
 
     def ang2pix(self, lon: torch.Tensor, lat: torch.Tensor) -> torch.Tensor:
-        """Get the pixel index containing the given longitude and latitude"""
+        """Get the pixel index containing the given longitude and latitude
+
+        Computed in the dtype of ``lon`` and ``lat``. With float64 inputs the result is the
+        HEALPix reference pixel; float32 inputs are faster, but a point within float32
+        rounding of a pixel edge can land in the neighbouring pixel.
+        """
         n = self.nside
         xs, ys = coordinates.angular_to_global(lon, lat)
         x, y, f = coordinates.global_to_face(xs, ys)

@@ -472,6 +472,20 @@ def test_ang2pix_regression(level, lon, lat, expected, dtype):
     assert pix.item() == expected
 
 
+@pytest.mark.parametrize("device", ["cuda", "cpu"])
+@pytest.mark.parametrize("level", [6, 10, 14])
+def test_ang2pix_float64_matches_reference(level, device):
+    if device == "cuda" and torch.cuda.device_count() == 0:
+        pytest.skip("no cuda devices available")
+    g = torch.Generator().manual_seed(0)
+    lon = torch.rand(100_000, generator=g, dtype=torch.float64) * 360
+    lat = torch.rad2deg(torch.asin(torch.rand(100_000, generator=g, dtype=torch.float64) * 2 - 1))
+    grid = healpix.Grid(level, pixel_order=healpix.PixelOrder.NEST)
+    pix = grid.ang2pix(lon.to(device), lat.to(device)).cpu()
+    expected = healpix_bare.ang2pix(grid.nside, lon, lat, nest=True, lonlat=True)
+    assert torch.equal(pix, expected)
+
+
 def _face_edge_points(dtype):
     """Points on the edges of the 12 base faces and on the meridians 0, 90, 180 and 270."""
     t = torch.linspace(0, 1, 401, dtype=torch.float64)
