@@ -129,3 +129,19 @@ def test_ring_info_matches_cpp(nside):
     torch.testing.assert_close(py_info.ringpix, cpp_info["ringpix"])
     torch.testing.assert_close(py_info.theta, cpp_info["theta"])
     torch.testing.assert_close(py_info.shifted, cpp_info["shifted"])
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+@pytest.mark.parametrize(
+    "call",
+    [
+        lambda pix: earth2grid.healpix_bare.nest2ring(8, pix),
+        lambda pix: earth2grid.healpix_bare.ring2nest(8, pix),
+        lambda pix: earth2grid.healpix_bare.pix2ang(8, pix),
+        lambda pix: earth2grid.healpix_bare.corners(8, pix, True),
+    ],
+)
+def test_cuda_input_raises(call):
+    # The C++ routines loop over host memory; a CUDA tensor must raise, not crash the process.
+    with pytest.raises(RuntimeError, match="CPU-only"):
+        call(torch.arange(4, device="cuda"))

@@ -25,6 +25,8 @@
 
 
 #define FILLNA(x) std::isnan(x) ? 0.0 : x
+// These routines loop over host memory, so a CUDA tensor must be refused rather than read.
+#define CHECK_CPU(x) TORCH_CHECK(x.device().is_cpu(), "healpix_bare is CPU-only: " #x " is on ", x.device())
 
 int return_1(void) {
     return 1;
@@ -33,6 +35,7 @@ int return_1(void) {
 template<typename Func>
 auto wrap(Func func) {
   return [func](int nside, torch::Tensor input) {
+    CHECK_CPU(input);
     auto output = torch::empty_like(input);
     auto accessor = input.accessor<int64_t, 1>();
     auto out_accessor = output.accessor<int64_t, 1>();
@@ -50,6 +53,7 @@ template <typename Func>
 auto wrap_2hpd(Func func) {
 
   return [func](int nside, torch::Tensor input){
+    CHECK_CPU(input);
     auto options = torch::TensorOptions().dtype(torch::kInt64);
     auto x = torch::empty_like(input, options);
     auto y = torch::empty_like(input, options);
@@ -72,6 +76,7 @@ auto wrap_2hpd(Func func) {
 }
 
 torch::Tensor hpd2loc_wrapper(int nside, torch::Tensor input) {
+    CHECK_CPU(input);
     auto accessor = input.accessor<int64_t, 2>();
 
     auto output_options = torch::TensorOptions().dtype(torch::kDouble);
@@ -96,6 +101,7 @@ torch::Tensor hpd2loc_wrapper(int nside, torch::Tensor input) {
 }
 
 torch::Tensor ang2ring_wrapper(int nside, torch::Tensor ang) {
+    CHECK_CPU(ang);
     auto ang_accessor = ang.accessor<double, 2>();
     auto output_options = torch::TensorOptions().dtype(torch::kInt64);
     auto output = torch::empty({ang.size(0)}, output_options);
@@ -110,6 +116,9 @@ torch::Tensor ang2ring_wrapper(int nside, torch::Tensor ang) {
 }
 
 torch::Tensor hpc2loc_wrapper(torch::Tensor x, torch::Tensor y, torch::Tensor f) {
+    CHECK_CPU(x);
+    CHECK_CPU(y);
+    CHECK_CPU(f);
     auto accessor_f = f.accessor<int64_t, 1>();
     auto accessor_x = x.accessor<double, 1>();
     auto accessor_y = y.accessor<double, 1>();
@@ -133,6 +142,7 @@ torch::Tensor hpc2loc_wrapper(torch::Tensor x, torch::Tensor y, torch::Tensor f)
 
 
 torch::Tensor corners(int nside, torch::Tensor pix, bool nest) {
+    CHECK_CPU(pix);
     auto accessor = pix.accessor<int64_t, 1>();
 
     auto output_options = torch::TensorOptions().dtype(torch::kDouble);
@@ -197,6 +207,8 @@ torch::Tensor corners(int nside, torch::Tensor pix, bool nest) {
 // loc2ang
 
 std::vector<torch::Tensor> get_interp_weights(int nside, torch::Tensor lon, torch::Tensor lat) {
+  CHECK_CPU(lon);
+  CHECK_CPU(lat);
 
   // setup outputs
   auto weight_options = torch::TensorOptions().dtype(torch::kDouble);
