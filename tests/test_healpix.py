@@ -33,6 +33,35 @@ def test_ring2xy():
     assert torch.allclose(xy.long(), xy_from_c)
 
 
+@pytest.mark.parametrize("level", [0, 1, 4, 8, 20, 29])
+def test_nest2ring_matches_c(level):
+    nside = 2**level
+    npix = 12 * nside * nside
+    if level <= 8:
+        pix = torch.arange(npix)
+    else:
+        pix = torch.randint(0, npix, (100_000,), generator=torch.Generator().manual_seed(0))
+    assert torch.equal(healpix.core.nest2ring(nside, pix), healpix_bare.nest2ring(nside, pix))
+
+
+def test_xy2ring_inverts_ring2xy():
+    nside = 16
+    p = torch.arange(12 * nside * nside)
+    assert torch.equal(healpix.xy2ring(nside, healpix.ring2xy(nside, p)), p)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="needs CUDA")
+@pytest.mark.parametrize("pixel_order", [healpix.PixelOrder.RING, healpix.PixelOrder.NEST, healpix.HEALPIX_PAD_XY])
+def test_ang2pix_cuda_matches_cpu(pixel_order):
+    grid = healpix.Grid(6, pixel_order=pixel_order)
+    generator = torch.Generator().manual_seed(0)
+    lon = torch.rand(10_000, dtype=torch.float64, generator=generator) * 360
+    lat = torch.rand(10_000, dtype=torch.float64, generator=generator) * 180 - 90
+    got = grid.ang2pix(lon.cuda(), lat.cuda())
+    assert got.device.type == "cuda"
+    assert torch.equal(got.cpu(), grid.ang2pix(lon, lat))
+
+
 @pytest.mark.xfail
 def test_grid_visualize():
     grid = healpix.Grid(level=4, pixel_order=healpix.XY())

@@ -302,7 +302,7 @@ class Grid(base.Grid):
             i_xy = nest2xy(self._nside(), ipix)
             i_me = xy2xy(nside=self._nside(), src=XY(), dest=self.pixel_order, i=i_xy)
         elif self.pixel_order == PixelOrder.RING:
-            i_me = healpix_bare.nest2ring(self._nside(), ipix)
+            i_me = nest2ring(self._nside(), ipix)
         elif self.pixel_order == PixelOrder.NEST:
             i_me = ipix
         return i_me
@@ -325,6 +325,8 @@ class Grid(base.Grid):
         x = (x * n).long()
         y = (y * n).long()
         f = f.long()
+        if self.pixel_order == PixelOrder.RING:
+            return _xyf_to_ring(n, x, y, f)
         nest = _xyf_to_nest(n, x, y, f)
         return self._nest2me(nest)
 
@@ -701,6 +703,51 @@ def ring2xy(nside, pix):
 
 def ring2nest(nside, pix):
     return xy2nest(nside, ring2xy(nside, pix))
+
+
+# Per base face: its row in units of nside, and its column offset in the RING numbering
+_FACE_ROW = (2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4)
+_FACE_COL = (1, 3, 5, 7, 0, 2, 4, 6, 1, 3, 5, 7)
+
+
+def _xyf_to_ring(nside, x, y, f):
+    """RING index of the pixel at column x, row y of base face f (HEALPix xyf2ring)"""
+    nl4 = 4 * nside
+    npix = 12 * nside * nside
+    ncap = 2 * nside * (nside - 1)
+
+    # 1-based ring number counted from the north pole; x + y is constant along a ring
+    ring = torch.tensor(_FACE_ROW, device=f.device)[f] * nside - x - y - 1
+    north = ring < nside
+    south = ring > 3 * nside
+
+    # a ring has 4 * nr pixels; before is the number of pixels in the rings above it
+    nr = torch.where(north, ring, torch.where(south, nl4 - ring, nside))
+    before = torch.where(
+        north,
+        2 * nr * (nr - 1),
+        torch.where(south, npix - 2 * (nr + 1) * nr, ncap + (ring - nside) * nl4),
+    )
+    # equatorial rings alternate a half-pixel shift
+    shift = torch.where(north | south, 0, (ring - nside) & 1)
+
+    # 1-based position in the ring, wrapped into [1, 4 * nr]
+    pos = (torch.tensor(_FACE_COL, device=f.device)[f] * nr + x - y + 1 + shift) // 2
+    pos = torch.where(pos > nl4, pos - nl4, torch.where(pos < 1, pos + nl4, pos))
+    return before + pos - 1
+
+
+def xy2ring(nside, pix):
+    """convert XY index to RING; the inverse of ring2xy"""
+    n2 = nside * nside
+    return _xyf_to_ring(nside, pix % nside, (pix % n2) // nside, pix // n2)
+
+
+def nest2ring(nside, pix):
+    """convert NEST index to RING; the inverse of ring2nest"""
+    n2 = nside * nside
+    j = pix % n2
+    return _xyf_to_ring(nside, _bit_ops.compact_bits(j), _bit_ops.compact_bits(j >> 1), pix // n2)
 
 
 def to_rotated_pixelization(x, fill_value=math.nan):
