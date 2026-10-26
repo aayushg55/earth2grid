@@ -142,6 +142,5 @@ def test_ring_info_matches_cpp(nside):
     ],
 )
 def test_cuda_input_raises(call):
-    # The C++ routines loop over host memory; a CUDA tensor must raise, not crash the process.
-    with pytest.raises(RuntimeError, match="CPU-only"):
+    with pytest.raises(RuntimeError, match="must be a CPU tensor"):
         call(torch.arange(4, device="cuda"))

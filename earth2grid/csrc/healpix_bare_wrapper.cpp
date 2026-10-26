@@ -25,8 +25,7 @@
 
 
 #define FILLNA(x) std::isnan(x) ? 0.0 : x
-// These routines loop over host memory, so a CUDA tensor must be refused rather than read.
-#define CHECK_CPU(x) TORCH_CHECK(x.device().is_cpu(), "healpix_bare is CPU-only: " #x " is on ", x.device())
+#define CHECK_CPU(x) TORCH_CHECK(x.device().is_cpu(), #x " must be a CPU tensor")
 
 int return_1(void) {
     return 1;
